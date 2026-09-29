@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Downloads</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>Downloads</h1>
+    <p class="sub">Files and links shared by Spencer. Tap a button to download.</p>
+  </header>
+
+  <section>
+    <h2>Files</h2>
+    <div id="files" class="list"><p class="note">Loading files…</p></div>
+  </section>
+
+  <section id="releases-section" hidden>
+    <h2>Latest release</h2>
+    <div id="releases" class="list"></div>
+  </section>
+
+  <section>
+    <h2>Links</h2>
+    <div id="links" class="list"><p class="note">Loading links…</p></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var OWNER = "x-alted1";
+  var REPO = "downloads";
+  var API = "https://api.github.com/repos/" + OWNER + "/" + REPO;
+  var SKIP = [".gitkeep", "readme", "readme.md", "readme.txt"];
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function note(container, text, isError) {
+    container.innerHTML = "";
+    container.appendChild(el("p", isError ? "note error" : "note", text));
+  }
+
+  function humanSize(bytes) {
+    if (typeof bytes !== "number" || isNaN(bytes)) return "";
+    var units = ["B", "KB", "MB", "GB"];
+    var i = 0, n = bytes;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(n < 10 ? 1 : 0)) + " " + units[i];
+  }
+
+  function safeUrl(u) {
+    try {
+      var p = new URL(u, location.href);
+      return (p.protocol === "https:" || p.protocol === "http:") ? p.href : null;
+    } catch (e) { return null; }
+  }
+
+  function card(title, meta, desc, href, label, isDownload) {
+    var c = el("div", "card");
+    var info = el("div", "info");
+    info.appendChild(el("div", "name", title));
+    if (meta) info.appendChild(el("div", "meta", meta));
+    if (desc) info.appendChild(el("div", "desc", desc));
+    var a = el("a", "btn", label);
+    a.href = href;
+    if (isDownload) { a.setAttribute("download", ""); }
+    else { a.target = "_blank"; a.rel = "noopener noreferrer"; }
+    c.appendChild(info);
+    c.appendChild(a);
+    return c;
+  }
+
+  function apiError(res) {
+    if (res.status === 403 || res.status === 429) {
+      return "GitHub's API rate limit was hit. Please try again in a few minutes.";
+    }
+    return "Couldn't load the file list (HTTP " + res.status + ").";
+  }
+
+  // Files in /files
+  var filesBox = document.getElementById("files");
+  fetch(API + "/contents/files", { headers: { "Accept": "application/vnd.github+json" } })
+    .then(function (res) {
+      if (res.status === 404) return [];
+      if (!res.ok) throw new Error(apiError(res));
+      return res.json();
+    })
+    .then(function (items) {
+      var files = (Array.isArray(items) ? items : []).filter(function (f) {
+        return f.type === "file" && SKIP.indexOf(f.name.toLowerCase()) === -1;
+      });
+      if (!files.length) { note(filesBox, "No files yet. Check back soon."); return; }
+      files.sort(function (a, b) { return a.name.localeCompare(b.name); });
+      filesBox.innerHTML = "";
+      files.forEach(function (f) {
+        var href = "files/" + encodeURIComponent(f.name);
+        filesBox.appendChild(card(f.name, humanSize(f.size), null, href, "Download", true));
+      });
+    })
+    .catch(function (err) {
+      note(filesBox, (err && err.message) || "Couldn't load the file list. Please try again later.", true);
+    });
+
+  // Assets from the latest GitHub Release (for bigger files)
+  fetch(API + "/releases/latest", { headers: { "Accept": "application/vnd.github+json" } })
+    .then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (rel) {
+      if (!rel || !Array.isArray(rel.assets) || !rel.assets.length) return;
+      var box = document.getElementById("releases");
+      var sec = document.getElementById("releases-section");
+      sec.querySelector("h2").textContent = "Latest release" + (rel.name || rel.tag_name ? ": " + (rel.name || rel.tag_name) : "");
+      rel.assets.forEach(function (a) {
+        var href = safeUrl(a.browser_download_url);
+        if (href) box.appendChild(card(a.name, humanSize(a.size), null, href, "Download", true));
+      });
+      if (box.children.length) sec.hidden = false;
+    })
+    .catch(function () { /* releases are optional */ });
+
+  // Links from links.json
+  var linksBox = document.getElementById("links");
+  fetch("links.json", { cache: "no-store" })
+    .then(function (res) {
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    })
+    .then(function (links) {
+      var list = (Array.isArray(links) ? links : []).filter(function (l) {
+        return l && typeof l.url === "string" && safeUrl(l.url);
+      });
+      if (!list.length) { note(linksBox, "No links yet."); return; }
+      linksBox.innerHTML = "";
+      list.forEach(function (l) {
+        linksBox.appendChild(card(String(l.title || l.url), null,
+          l.description ? String(l.description) : null, safeUrl(l.url), "Open", false));
+      });
+    })
+    .catch(function () { note(linksBox, "Couldn't load links.", true); });
+})();
+</script>
+</body>
+</html>
