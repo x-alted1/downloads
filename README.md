@@ -6,6 +6,10 @@ Anything in the `files` folder shows up on the page with a Download button. Link
 
 ## Add a file
 
+**On the page (easiest):** open the site, expand **Owner token**, paste a GitHub fine-grained token for `x-alted1/downloads` with *Contents: Read and write* (stored only in that browser), then drag files onto the drop zone. Each file is committed to `files/` and shows up as a download about a minute later. In-page uploads are capped at 50 MB.
+
+**On github.com:**
+
 1. Open this repo on github.com.
 2. Go into the `files` folder.
 3. Click **Add file** → **Upload files**.

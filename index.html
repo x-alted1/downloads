@@ -13,6 +13,25 @@
     <p class="sub">Files and links shared by Spencer. Tap a button to download.</p>
   </header>
 
+  <section id="upload-section">
+    <h2>Upload</h2>
+    <div id="drop" class="drop" tabindex="0" role="button" aria-label="Drop files here or click to choose">
+      <div class="drop-title">Drop files here</div>
+      <div class="drop-sub">or click to choose. Files are committed to the repo and appear below.</div>
+      <input id="picker" type="file" multiple hidden>
+    </div>
+    <div id="upload-status" class="status"></div>
+    <details id="token-box" class="token">
+      <summary>Owner token <span id="token-state"></span></summary>
+      <p class="hint">Uploading needs a GitHub fine-grained token for <b>x-alted1/downloads</b> with <b>Contents: Read and write</b>. It is saved only in this browser (localStorage) and sent only to api.github.com.</p>
+      <div class="token-row">
+        <input id="token" type="password" placeholder="github_pat_…" autocomplete="off">
+        <button id="save-token" class="btn small" type="button">Save</button>
+        <button id="clear-token" class="btn small ghost" type="button">Forget</button>
+      </div>
+    </details>
+  </section>
+
   <section>
     <h2>Files</h2>
     <div id="files" class="list"><p class="note">Loading files…</p></div>
@@ -87,7 +106,8 @@
 
   // Files in /files
   var filesBox = document.getElementById("files");
-  fetch(API + "/contents/files", { headers: { "Accept": "application/vnd.github+json" } })
+  function loadFiles() {
+  fetch(API + "/contents/files?t=" + Date.now(), { headers: { "Accept": "application/vnd.github+json" }, cache: "no-store" })
     .then(function (res) {
       if (res.status === 404) return [];
       if (!res.ok) throw new Error(apiError(res));
@@ -108,6 +128,131 @@
     .catch(function (err) {
       note(filesBox, (err && err.message) || "Couldn't load the file list. Please try again later.", true);
     });
+  }
+  loadFiles();
+
+  // ---- Drag-and-drop upload (commits to /files via the GitHub Contents API) ----
+  var TOKEN_KEY = "downloads_gh_token";
+  var MAX_BYTES = 50 * 1024 * 1024; // Contents API uploads are base64 in JSON; keep them modest
+  var drop = document.getElementById("drop");
+  var picker = document.getElementById("picker");
+  var statusBox = document.getElementById("upload-status");
+  var tokenInput = document.getElementById("token");
+  var tokenState = document.getElementById("token-state");
+  var tokenBox = document.getElementById("token-box");
+
+  function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
+  function showTokenState() {
+    var has = !!getToken();
+    tokenState.textContent = has ? "(saved)" : "(not set)";
+    tokenState.className = has ? "ok" : "warn";
+  }
+  document.getElementById("save-token").onclick = function () {
+    var v = tokenInput.value.trim();
+    if (!v) return;
+    try { localStorage.setItem(TOKEN_KEY, v); } catch (e) {}
+    tokenInput.value = "";
+    showTokenState();
+    tokenBox.open = false;
+  };
+  document.getElementById("clear-token").onclick = function () {
+    try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+    showTokenState();
+  };
+  showTokenState();
+
+  function status(text, cls) {
+    var line = el("div", "status-line " + (cls || ""), text);
+    statusBox.appendChild(line);
+    return line;
+  }
+
+  function cleanName(name) {
+    var n = String(name).replace(/[\\/]/g, "_").replace(/^\.+/, "").trim();
+    return n || "file";
+  }
+
+  function toBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { var s = String(r.result); resolve(s.slice(s.indexOf(",") + 1)); };
+      r.onerror = function () { reject(new Error("Couldn't read the file.")); };
+      r.readAsDataURL(file);
+    });
+  }
+
+  function gh(path, opts, token) {
+    opts = opts || {};
+    opts.headers = Object.assign({
+      "Accept": "application/vnd.github+json",
+      "Authorization": "Bearer " + token
+    }, opts.headers || {});
+    return fetch(API + path, opts);
+  }
+
+  function uploadOne(file, token) {
+    var name = cleanName(file.name);
+    var line = status("Uploading " + name + " (" + humanSize(file.size) + ")…");
+    if (file.size > MAX_BYTES) {
+      line.textContent = name + ": too big for in-page upload (" + humanSize(file.size) + "). Use GitHub Releases for large files.";
+      line.className = "status-line error";
+      return Promise.resolve();
+    }
+    var path = "/contents/files/" + encodeURIComponent(name);
+    return Promise.all([
+      toBase64(file),
+      gh(path + "?ref=main&t=" + Date.now(), { cache: "no-store" }, token).then(function (r) { return r.ok ? r.json() : null; })
+    ]).then(function (res) {
+      var body = { message: "Upload " + name, content: res[0], branch: "main" };
+      if (res[1] && res[1].sha) body.sha = res[1].sha; // overwrite existing file
+      return gh(path, { method: "PUT", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } }, token);
+    }).then(function (r) {
+      if (r.ok) {
+        line.textContent = "Uploaded " + name + ". The download link goes live in about a minute.";
+        line.className = "status-line ok";
+        return;
+      }
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        var msg = r.status === 401 ? "token was rejected (401). Check or replace it." :
+                  r.status === 403 || r.status === 404 ? "token lacks write access to this repo (" + r.status + ")." :
+                  (j.message || ("HTTP " + r.status));
+        line.textContent = name + ": " + msg;
+        line.className = "status-line error";
+      });
+    }).catch(function (e) {
+      line.textContent = name + ": " + (e.message || "upload failed");
+      line.className = "status-line error";
+    });
+  }
+
+  function handleFiles(list) {
+    var files = Array.prototype.slice.call(list || []);
+    if (!files.length) return;
+    var token = getToken();
+    if (!token) {
+      status("Add your owner token first (open \"Owner token\" below).", "error");
+      tokenBox.open = true;
+      return;
+    }
+    statusBox.innerHTML = "";
+    // sequential uploads avoid commit conflicts on main
+    files.reduce(function (p, f) { return p.then(function () { return uploadOne(f, token); }); }, Promise.resolve())
+      .then(function () { loadFiles(); });
+  }
+
+  ["dragenter", "dragover"].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add("over"); });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove("over"); });
+  });
+  drop.addEventListener("drop", function (e) { handleFiles(e.dataTransfer && e.dataTransfer.files); });
+  drop.addEventListener("click", function () { picker.click(); });
+  drop.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); picker.click(); } });
+  picker.addEventListener("change", function () { handleFiles(picker.files); picker.value = ""; });
+  // stop the browser from opening files dropped outside the zone
+  window.addEventListener("dragover", function (e) { e.preventDefault(); });
+  window.addEventListener("drop", function (e) { e.preventDefault(); });
 
   // Assets from the latest GitHub Release (for bigger files)
   fetch(API + "/releases/latest", { headers: { "Accept": "application/vnd.github+json" } })

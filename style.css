@@ -51,3 +51,27 @@ h2 {
   .card { flex-direction: column; align-items: stretch; }
   .btn { width: 100%; padding: 14px 20px; }
 }
+.drop {
+  border: 2px dashed var(--border); border-radius: 14px; padding: 28px 16px;
+  text-align: center; cursor: pointer; background: var(--panel);
+  transition: border-color .15s, background .15s;
+}
+.drop:hover, .drop:focus-visible, .drop.over { border-color: var(--accent); background: #1b2130; outline: none; }
+.drop-title { font-weight: 700; font-size: 1.1rem; }
+.drop-sub { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
+.status { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.status-line { font-size: 0.9rem; color: var(--muted); }
+.status-line.ok { color: #4ade80; }
+.status-line.error { color: var(--error); }
+.token { margin-top: 12px; color: var(--muted); font-size: 0.9rem; }
+.token summary { cursor: pointer; }
+.token .ok { color: #4ade80; }
+.token .warn { color: #fbbf24; }
+.hint { margin: 8px 0; }
+.token-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.token-row input {
+  flex: 1; min-width: 180px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font: inherit;
+}
+.btn.small { min-width: 0; padding: 10px 14px; border: 0; font: inherit; font-weight: 600; cursor: pointer; }
+.btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
